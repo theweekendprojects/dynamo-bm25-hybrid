@@ -1,0 +1,46 @@
+{
+  "name": "dynamo-bm25-hybrid",
+  "version": "0.1.0",
+  "description": "Serverless hybrid search: BM25 keyword index on DynamoDB + Reciprocal Rank Fusion. Zero infrastructure cost at rest.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "bm25",
+    "hybrid-search",
+    "rag",
+    "reciprocal-rank-fusion",
+    "rrf",
+    "dynamodb",
+    "serverless",
+    "keyword-search",
+    "full-text-search"
+  ],
+  "dependencies": {
+    "@aws-sdk/lib-dynamodb": "^3.600.0",
+    "@aws-sdk/client-dynamodb": "^3.600.0",
+    "wink-bm25-text-search": "^3.1.0",
+    "wink-nlp-utils": "^2.1.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
