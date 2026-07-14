@@ -2,31 +2,31 @@
  * Core types for the hybrid search library.
  */
 
-/** A document chunk with text and metadata. */
-export interface Chunk {
-  /** Unique chunk identifier */
+/** A text segment (a piece of a document) with its metadata. */
+export interface Segment {
+  /** Unique segment identifier */
   id: string;
   /** Full text content */
   text: string;
   /** Source document identifier */
-  documentId: string;
+  docId: string;
   /** Human-readable document name */
-  documentName: string;
+  docName: string;
   /** Page/section number in the source document */
-  pageNumber: number;
+  page: number;
 }
 
-/** A search result with its relevance score. */
-export interface ScoredChunk {
-  chunk: Chunk;
+/** A search hit — a segment paired with its relevance score. */
+export interface ScoredSegment {
+  segment: Segment;
   /** Relevance score (higher = more relevant). Meaning depends on the source. */
   score: number;
 }
 
-/** A ranked result from any retrieval source — only needs an ID and rank position. */
-export interface RankedItem<T = unknown> {
-  /** Unique key to identify this item across lists (for deduplication/fusion) */
+/** A ranked entry from any retrieval source — only needs a key and rank position. */
+export interface RankedEntry<T = unknown> {
+  /** Unique key to identify this entry across lists (for deduplication/fusion) */
   key: string;
   /** The actual payload */
-  item: T;
+  value: T;
 }

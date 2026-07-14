@@ -2,25 +2,25 @@
  * Reciprocal Rank Fusion (RRF) — merges N ranked lists into one.
  *
  * Formula: score(d) = Σ 1 / (k + rank_i(d))
- *   where k is a constant (default 60) that prevents top-ranked items from dominating,
- *   and rank_i(d) is the 1-based position of document d in list i.
+ *   where k is a constant (default 60) that prevents top-ranked entries from dominating,
+ *   and rank_i(d) is the 1-based position of entry d in list i.
  *
- * If a document appears in multiple lists, its scores are summed — this is the
- * "hybrid boost" that surfaces documents relevant to multiple retrieval strategies.
+ * If an entry appears in multiple lists, its scores are summed — this is the
+ * "hybrid boost" that surfaces entries relevant to multiple retrieval strategies.
  *
  * Reference: Cormack, Clarke & Buettcher (2009) "Reciprocal Rank Fusion outperforms
  * Condorcet and individual Rank Learning Methods"
  *
- * Generic: works with any item type, any number of ranked lists.
+ * Generic: works with any value type, any number of ranked lists.
  */
 
-import type { RankedItem } from './types.js';
+import type { RankedEntry } from './types.js';
 
 /** Options for RRF fusion. */
-export interface RRFOptions {
+export interface FuseOptions {
   /**
    * The k constant. Higher values flatten score differences between ranks.
-   * Standard value: 60 (used by most IR research and Elasticsearch/OpenSearch).
+   * Standard value: 60 (used by most IR research and popular search engines).
    * @default 60
    */
   k?: number;
@@ -28,58 +28,58 @@ export interface RRFOptions {
    * Maximum number of results to return.
    * @default Infinity (return all)
    */
-  topK?: number;
+  limit?: number;
 }
 
 /** A fused result with its combined RRF score. */
-export interface FusedResult<T> {
+export interface FusedEntry<T> {
   key: string;
-  item: T;
-  /** Combined RRF score (sum across all lists where this item appeared). */
+  value: T;
+  /** Combined RRF score (sum across all lists where this entry appeared). */
   score: number;
-  /** How many of the input lists contained this item. */
-  listCount: number;
+  /** How many of the input lists contained this entry. */
+  hitCount: number;
 }
 
 /**
  * Fuses multiple ranked result lists using Reciprocal Rank Fusion.
  *
- * @param lists - Array of ranked lists. Each list is an array of RankedItem in rank order (best first).
- * @param options - RRF parameters.
+ * @param lists - Array of ranked lists. Each list is an array of RankedEntry in rank order (best first).
+ * @param options - Fusion parameters.
  * @returns Fused results sorted by combined RRF score (descending).
  *
  * @example
  * ```ts
  * import { fuse } from 'dynamo-bm25-hybrid';
  *
- * const semantic = [{ key: 'doc-1', item: chunk1 }, { key: 'doc-2', item: chunk2 }];
- * const keyword  = [{ key: 'doc-2', item: chunk2 }, { key: 'doc-3', item: chunk3 }];
+ * const semantic = [{ key: 'doc-1', value: seg1 }, { key: 'doc-2', value: seg2 }];
+ * const keyword  = [{ key: 'doc-2', value: seg2 }, { key: 'doc-3', value: seg3 }];
  *
- * const results = fuse([semantic, keyword], { topK: 5 });
+ * const results = fuse([semantic, keyword], { limit: 5 });
  * // doc-2 ranks highest (appeared in both lists)
  * ```
  */
-export function fuse<T>(lists: RankedItem<T>[][], options: RRFOptions = {}): FusedResult<T>[] {
-  const { k = 60, topK = Infinity } = options;
+export function fuse<T>(lists: RankedEntry<T>[][], options: FuseOptions = {}): FusedEntry<T>[] {
+  const { k = 60, limit = Infinity } = options;
 
-  const scoreMap = new Map<string, FusedResult<T>>();
+  const tally = new Map<string, FusedEntry<T>>();
 
   for (const list of lists) {
     for (let rank = 0; rank < list.length; rank++) {
-      const { key, item } = list[rank];
-      const rrfScore = 1 / (k + rank + 1); // rank is 0-based, formula uses 1-based
+      const { key, value } = list[rank];
+      const contribution = 1 / (k + rank + 1); // rank is 0-based, formula uses 1-based
 
-      const existing = scoreMap.get(key);
+      const existing = tally.get(key);
       if (existing) {
-        existing.score += rrfScore;
-        existing.listCount += 1;
+        existing.score += contribution;
+        existing.hitCount += 1;
       } else {
-        scoreMap.set(key, { key, item, score: rrfScore, listCount: 1 });
+        tally.set(key, { key, value, score: contribution, hitCount: 1 });
       }
     }
   }
 
-  const sorted = Array.from(scoreMap.values()).sort((a, b) => b.score - a.score);
+  const ordered = Array.from(tally.values()).sort((a, b) => b.score - a.score);
 
-  return topK === Infinity ? sorted : sorted.slice(0, topK);
+  return limit === Infinity ? ordered : ordered.slice(0, limit);
 }

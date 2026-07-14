@@ -88,48 +88,46 @@ npm install @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
 ```ts
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { ChunkStore, BM25Indexer } from 'dynamo-bm25-hybrid';
+import { SegmentStore, LexicalIndexer } from 'dynamo-bm25-hybrid';
 
 const db = DynamoDBDocumentClient.from(new DynamoDBClient({}));
-const chunks  = new ChunkStore({ docClient: db, tableName: 'rag' });
-const indexer = new BM25Indexer({ docClient: db, tableName: 'rag' });
+const segments = new SegmentStore({ docClient: db, tableName: 'rag' });
+const indexer  = new LexicalIndexer({ docClient: db, tableName: 'rag' });
 
-// Store the chunks of a document
-await chunks.writeChunks('tenant-42', 'doc-abc', 'api-reference.pdf', [
-  { text: 'Error ERR_CONN_REFUSED is thrown when the target host refuses the TCP connection.', pageNumber: 1 },
-  { text: 'Retry logic should use exponential backoff with a max of 3 attempts.',              pageNumber: 2 },
+// Store the segments of a document
+await segments.putSegments('tenant-42', 'doc-abc', 'api-reference.pdf', [
+  { text: 'Error ERR_CONN_REFUSED is thrown when the target host refuses the TCP connection.', page: 1 },
+  { text: 'Retry logic should use exponential backoff with a max of 3 attempts.',              page: 2 },
 ]);
 
 // (Re)build the keyword index for the whole tenant
-const all = await chunks.getChunksForNamespace('tenant-42');
-const { chunkCount, sizeKB, buildTimeMs } = await indexer.build('tenant-42',
-  all.map(c => ({ id: c.id, text: c.text, documentId: c.documentId,
-                  documentName: c.documentName, pageNumber: c.pageNumber })));
+const all = await segments.listByNamespace('tenant-42');
+const { segmentCount, bytesKB, buildMs } = await indexer.build('tenant-42',
+  all.map(s => ({ id: s.id, text: s.text, docId: s.docId, docName: s.docName, page: s.page })));
 
-console.log(`indexed ${chunkCount} chunks · ${sizeKB}KB · ${buildTimeMs}ms`);
+console.log(`indexed ${segmentCount} segments · ${bytesKB}KB · ${buildMs}ms`);
 ```
 
 ### 2️⃣ Query — hybrid search in one call
 
 ```ts
-import { BM25Searcher, HybridSearch } from 'dynamo-bm25-hybrid';
+import { LexicalSearcher, HybridSearch } from 'dynamo-bm25-hybrid';
 
 const hybrid = new HybridSearch({
-  bm25: new BM25Searcher({ docClient: db, tableName: 'rag' }),
+  lexical: new LexicalSearcher({ docClient: db, tableName: 'rag' }),
 
   // Plug in ANY vector search — this is the only glue you write
-  semanticSearch: async (query, namespace, topK) => {
-    const hits = await myVectorDB.search(query, { namespace, limit: topK });
+  vectorSearch: async (query, namespace, limit) => {
+    const hits = await myVectorDB.search(query, { namespace, limit });
     return hits.map(h => ({
-      chunk: { id: h.id, text: h.text, documentId: h.docId,
-               documentName: h.docName, pageNumber: h.page },
+      segment: { id: h.id, text: h.text, docId: h.docId, docName: h.docName, page: h.page },
       score: h.similarity,
     }));
   },
 });
 
 const results = await hybrid.search('what does ERR_CONN_REFUSED mean?', 'tenant-42', 5);
-//                                                    ↑ chunks found by BOTH paths rank first
+//                                                    ↑ segments found by BOTH strategies rank first
 ```
 
 That's it. No cluster to provision, no index lifecycle to babysit.
@@ -151,9 +149,9 @@ const searchKnowledge = tool({
   execute: async ({ query }) => {
     const results = await hybrid.search(query, currentTenant, 5);
     return results.map(r => ({
-      text: r.chunk.text,
-      source: `${r.chunk.documentName} (p.${r.chunk.pageNumber})`,
-      matchedBy: r.sources === 2 ? 'keyword + semantic' : 'single strategy',
+      text: r.segment.text,
+      source: `${r.segment.docName} (p.${r.segment.page})`,
+      matchedBy: r.strategies === 2 ? 'keyword + semantic' : 'single strategy',
     }));
   },
 });
@@ -164,7 +162,7 @@ const searchKnowledge = tool({
 **Why agents love this tool:**
 - **One tool, both strategies** — the agent doesn't have to reason about "should I keyword-search or vector-search?" It asks once; fusion handles the rest.
 - **Grounded citations** — every result carries its document + page, so the agent can attribute claims and you can verify them.
-- **`matchedBy` signal** — results found by both strategies (`sources: 2`) are the strongest; agents can weight them or surface them first.
+- **`matchedBy` signal** — results found by both strategies (`strategies: 2`) are the strongest; agents can weight them or surface them first.
 - **Cheap enough to over-call** — at DynamoDB on-demand prices, an agent hammering the search tool during a reasoning loop costs pennies, not a cluster.
 
 ## 🧬 Use the RRF fusion on its own
@@ -174,15 +172,15 @@ The fusion engine is completely standalone — no DynamoDB, no BM25 required. Me
 ```ts
 import { fuse } from 'dynamo-bm25-hybrid';
 
-const semantic = [{ key: 'a', item: docA }, { key: 'b', item: docB }];
-const keyword  = [{ key: 'b', item: docB }, { key: 'c', item: docC }];
-const graph    = [{ key: 'b', item: docB }, { key: 'd', item: docD }];
+const semantic = [{ key: 'a', value: docA }, { key: 'b', value: docB }];
+const keyword  = [{ key: 'b', value: docB }, { key: 'c', value: docC }];
+const graph    = [{ key: 'b', value: docB }, { key: 'd', value: docD }];
 
-const merged = fuse([semantic, keyword, graph], { topK: 5 });
+const merged = fuse([semantic, keyword, graph], { limit: 5 });
 // → docB is #1: it's the only result all three strategies agreed on
 ```
 
-**How RRF works** — each list contributes `1 / (k + rank)` to every item it contains (`k = 60` by default). Items appearing in multiple lists accumulate score across them, so *agreement between retrievers wins*. No score normalization, no tuning, no training. It just works, and it [beat learned rank-fusion methods in the original 2009 paper](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf).
+**How RRF works** — each list contributes `1 / (k + rank)` to every entry it contains (`k = 60` by default). Entries appearing in multiple lists accumulate score across them, so *agreement between retrievers wins*. No score normalization, no tuning, no training. It just works, and it [beat learned rank-fusion methods in the original 2009 paper](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf).
 
 ## 🎯 When to reach for this
 
@@ -200,8 +198,8 @@ This library uses **single-table design**. You can share the table with your exi
 
 | PK | SK | Purpose |
 |----|-----|---------|
-| `CHUNKS#{namespace}` | `DOC#{docId}#C#{0001}` | Chunk text + metadata |
-| `BM25_INDEX#{namespace}` | `INDEX` | Serialized BM25 index (JSON blob) |
+| `SEG#{namespace}` | `D#{docId}#S#{0001}` | Segment text + metadata |
+| `LEXIDX#{namespace}` | `BLOB` | Serialized BM25 index (JSON blob) |
 
 **Required table schema:**
 - Partition key: `PK` (String)
@@ -216,21 +214,21 @@ aws dynamodb create-table \
   --billing-mode PAY_PER_REQUEST
 ```
 
-The PK/SK prefixes are configurable via `pkPrefix` and `sk` options.
+The PK/SK prefixes are configurable via `keyPrefix` and `sortKey` options.
 
 ## 📚 API at a glance
 
 | Export | What it does |
 | :--- | :--- |
 | `fuse(lists, opts?)` | Generic Reciprocal Rank Fusion over N ranked lists |
-| `BM25Indexer` | Builds & serializes the keyword index into DynamoDB (ingestion time) |
-| `BM25Searcher` | Loads the index and runs keyword search (query time, ~10ms) |
-| `ChunkStore` | Store / read / delete chunks by document or namespace |
+| `LexicalIndexer` | Builds & serializes the keyword index into DynamoDB (ingestion time) |
+| `LexicalSearcher` | Loads the index and runs keyword search (query time, ~10ms) |
+| `SegmentStore` | Store / read / delete segments by document or namespace |
 | `HybridSearch` | Convenience: parallel vector + BM25, fused with RRF |
 
 ## ⚖️ Good to know
 
-- **400 KB per index.** The serialized BM25 index lives in a single DynamoDB item, so it caps at ~3–4k chunks per namespace. The library warns at 380 KB. Bigger corpus? Store the blob in S3 instead — same code, swap the persistence line.
+- **400 KB per index.** The serialized BM25 index lives in a single DynamoDB item, so it caps at ~3–4k segments per namespace. The library warns at 380 KB. Bigger corpus? Store the blob in S3 instead — same code, swap the persistence line.
 - **Full rebuild per namespace.** Adding a document rebuilds that namespace's index. This is milliseconds at typical scale and keeps the design dead simple. If you have huge, high-churn namespaces, batch your rebuilds.
 - **Language.** Ships with English stemming/stop-words out of the box (via `wink-nlp-utils`). Swap the prep-task pipeline for other languages.
 

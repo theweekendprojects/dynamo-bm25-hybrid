@@ -1,17 +1,17 @@
 // Core types
-export type { Chunk, ScoredChunk, RankedItem } from './types.js';
+export type { Segment, ScoredSegment, RankedEntry } from './types.js';
 
 // RRF — generic fusion, usable standalone without DynamoDB
-export { fuse, type RRFOptions, type FusedResult } from './rrf.js';
+export { fuse, type FuseOptions, type FusedEntry } from './rrf.js';
 
-// BM25 search (query-time)
-export { BM25Searcher, type BM25SearcherOptions, type ChunkMeta } from './bm25.js';
+// Lexical (BM25) search — query-time
+export { LexicalSearcher, type LexicalSearcherOptions, type SegmentMeta } from './bm25.js';
 
-// BM25 indexer (ingestion-time)
-export { BM25Indexer, type BM25IndexerOptions, type IndexChunkInput, type BuildResult } from './indexer.js';
+// Lexical index builder — ingestion-time
+export { LexicalIndexer, type LexicalIndexerOptions, type IndexInput, type BuildStats } from './indexer.js';
 
-// Chunk store (DynamoDB storage)
-export { ChunkStore, type ChunkStoreOptions, type ChunkInput } from './chunk-store.js';
+// Segment store — DynamoDB storage
+export { SegmentStore, type SegmentStoreOptions, type SegmentInput } from './segment-store.js';
 
-// Hybrid search (convenience: semantic + BM25 + RRF)
-export { HybridSearch, type HybridSearchOptions, type HybridResult, type SemanticSearchFn } from './hybrid.js';
+// Hybrid search — convenience: vector + BM25 + RRF
+export { HybridSearch, type HybridSearchOptions, type HybridHit, type VectorSearchFn } from './hybrid.js';

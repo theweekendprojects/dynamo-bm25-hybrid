@@ -2,9 +2,9 @@
  * BM25 Search — query-time keyword search using a pre-built index stored in DynamoDB.
  *
  * Architecture:
- *   - At ingestion time, BM25Indexer builds a wink-bm25-text-search index and
+ *   - At ingestion time, LexicalIndexer builds a wink-bm25-text-search index and
  *     serializes it to a single DynamoDB item (JSON blob).
- *   - At query time, BM25Searcher loads the serialized index, imports it into
+ *   - At query time, LexicalSearcher loads the serialized index, imports it into
  *     a fresh wink engine, and runs the search.
  *
  * Performance:
@@ -19,7 +19,7 @@
  *   - Zero cost at rest — no servers, no clusters
  *
  * Limitations:
- *   - DynamoDB item size limit is 400KB — supports ~3000-4000 chunks per namespace
+ *   - DynamoDB item size limit is 400KB — supports ~3000-4000 segments per namespace
  *   - For larger corpora, store the index in S3 instead (see README)
  */
 
@@ -29,47 +29,47 @@ import bm25 from 'wink-bm25-text-search';
 // @ts-ignore — wink-nlp-utils doesn't ship TS types
 import nlp from 'wink-nlp-utils';
 
-import type { ScoredChunk, Chunk } from './types.js';
+import type { ScoredSegment, Segment } from './types.js';
 
-/** Options for the BM25 searcher. */
-export interface BM25SearcherOptions {
+/** Options for the lexical searcher. */
+export interface LexicalSearcherOptions {
   /** DynamoDB Document Client instance. */
   docClient: DynamoDBDocumentClient;
   /** DynamoDB table name. */
   tableName: string;
   /**
    * Partition key prefix for the index item.
-   * Full PK will be: `${pkPrefix}${namespace}`
-   * @default 'BM25_INDEX#'
+   * Full PK will be: `${keyPrefix}${namespace}`
+   * @default 'LEXIDX#'
    */
-  pkPrefix?: string;
+  keyPrefix?: string;
   /**
    * Sort key for the index item.
-   * @default 'INDEX'
+   * @default 'BLOB'
    */
-  sk?: string;
+  sortKey?: string;
 }
 
-/** Metadata stored alongside each chunk in the serialized index. */
-export interface ChunkMeta {
+/** Metadata stored alongside each segment in the serialized index. */
+export interface SegmentMeta {
   id: string;
-  document_id: string;
-  document_name: string;
-  page_number: number;
+  docId: string;
+  docName: string;
+  page: number;
   preview: string;
 }
 
-export class BM25Searcher {
+export class LexicalSearcher {
   private readonly docClient: DynamoDBDocumentClient;
   private readonly tableName: string;
-  private readonly pkPrefix: string;
-  private readonly sk: string;
+  private readonly keyPrefix: string;
+  private readonly sortKey: string;
 
-  constructor(options: BM25SearcherOptions) {
+  constructor(options: LexicalSearcherOptions) {
     this.docClient = options.docClient;
     this.tableName = options.tableName;
-    this.pkPrefix = options.pkPrefix ?? 'BM25_INDEX#';
-    this.sk = options.sk ?? 'INDEX';
+    this.keyPrefix = options.keyPrefix ?? 'LEXIDX#';
+    this.sortKey = options.sortKey ?? 'BLOB';
   }
 
   /**
@@ -77,24 +77,24 @@ export class BM25Searcher {
    *
    * @param namespace - Logical grouping (e.g. tenant ID, project ID)
    * @param query - User's search query
-   * @param topK - Number of top results (default: 8)
+   * @param limit - Number of top results (default: 8)
    * @returns Ranked results with metadata, or empty array if no index exists
    */
-  async search(namespace: string, query: string, topK = 8): Promise<ScoredChunk[]> {
+  async search(namespace: string, query: string, limit = 8): Promise<ScoredSegment[]> {
     const result = await this.docClient.send(new GetCommand({
       TableName: this.tableName,
-      Key: { PK: `${this.pkPrefix}${namespace}`, SK: this.sk },
-      ProjectionExpression: '#d',
-      ExpressionAttributeNames: { '#d': 'data' },
+      Key: { PK: `${this.keyPrefix}${namespace}`, SK: this.sortKey },
+      ProjectionExpression: '#p',
+      ExpressionAttributeNames: { '#p': 'payload' },
     }));
 
-    if (!result.Item?.data) {
+    if (!result.Item?.payload) {
       return [];
     }
 
-    const { index: indexJSON, meta: chunkMeta } = JSON.parse(result.Item.data as string) as {
+    const { index: indexJSON, meta } = JSON.parse(result.Item.payload as string) as {
       index: string;
-      meta: ChunkMeta[];
+      meta: SegmentMeta[];
     };
 
     const engine = bm25();
@@ -108,18 +108,18 @@ export class BM25Searcher {
     ]);
     engine.importJSON(indexJSON);
 
-    const searchResults = engine.search(query, topK) as Array<[number, number]>;
+    const hits = engine.search(query, limit) as Array<[number, number]>;
 
-    return searchResults.map(([chunkIdx, score]) => {
-      const meta = chunkMeta[chunkIdx] ?? {};
-      const chunk: Chunk = {
-        id: meta.id ?? `chunk-${chunkIdx}`,
-        text: meta.preview ?? '',
-        documentId: meta.document_id ?? '',
-        documentName: meta.document_name ?? '',
-        pageNumber: meta.page_number ?? 1,
+    return hits.map(([idx, score]) => {
+      const m = meta[idx] ?? ({} as SegmentMeta);
+      const segment: Segment = {
+        id: m.id ?? `seg-${idx}`,
+        text: m.preview ?? '',
+        docId: m.docId ?? '',
+        docName: m.docName ?? '',
+        page: m.page ?? 1,
       };
-      return { chunk, score };
+      return { segment, score };
     });
   }
 }
