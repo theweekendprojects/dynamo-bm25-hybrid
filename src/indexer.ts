@@ -83,7 +83,7 @@ export class BM25Indexer {
    * Builds a BM25 index from all chunks and persists it to DynamoDB.
    * Overwrites any existing index for the namespace (idempotent).
    *
-   * @param namespace - Logical grouping (e.g. workspace ID, tenant ID)
+   * @param namespace - Logical grouping (e.g. tenant ID, project ID)
    * @param chunks - All chunks to index for this namespace
    * @returns Build statistics
    */

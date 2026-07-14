@@ -52,7 +52,7 @@ export class HybridSearch {
    * Performs hybrid retrieval: runs semantic + BM25 in parallel, fuses with RRF.
    *
    * @param query - User's search query
-   * @param namespace - Namespace to search (e.g. workspace ID)
+   * @param namespace - Namespace to search (e.g. tenant ID)
    * @param topK - Number of final results after fusion
    */
   async search(query: string, namespace: string, topK = 8): Promise<HybridResult[]> {

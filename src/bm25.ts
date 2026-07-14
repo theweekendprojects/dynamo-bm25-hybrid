@@ -75,7 +75,7 @@ export class BM25Searcher {
   /**
    * Searches a namespace's pre-built BM25 index.
    *
-   * @param namespace - Logical grouping (e.g. workspace ID, tenant ID)
+   * @param namespace - Logical grouping (e.g. tenant ID, project ID)
    * @param query - User's search query
    * @param topK - Number of top results (default: 8)
    * @returns Ranked results with metadata, or empty array if no index exists
