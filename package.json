@@ -1,5 +1,5 @@
 {
-  "name": "dynamo-bm25-hybrid",
+  "name": "@theweekendprojects/dynamo-bm25-hybrid",
   "version": "0.1.0",
   "description": "Serverless hybrid search: BM25 keyword index on DynamoDB + Reciprocal Rank Fusion. Zero infrastructure cost at rest.",
   "license": "MIT",
